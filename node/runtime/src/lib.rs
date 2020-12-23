@@ -59,7 +59,7 @@ use sp_runtime::{
 };
 
 pub use sp_runtime::curve::PiecewiseLinear;
-use sp_runtime::traits::{
+use sp_runtime::traits::{AccountIdConversion,
 	self, BlakeTwo256, Block as BlockT, StaticLookup, SaturatedConversion,
 	ConvertInto, OpaqueKeys, NumberFor,
 };
@@ -100,6 +100,7 @@ use impls::{Author};
 pub mod constants;
 use constants::{currency::*, time::*};
 use sp_runtime::generic::Era;
+
 
 // Make the WASM binary available.
 #[cfg(feature = "std")]
@@ -657,27 +658,64 @@ impl pallet_treasury::Config for Runtime {
 		EnsureRoot<AccountId>,
 		pallet_collective::EnsureProportionAtLeast<_3, _5, AccountId, CouncilCollective>
 	>;
-	type RejectOrigin = EnsureRootOrHalfCouncil;
-	type Tippers = Elections;
-	type TipCountdown = TipCountdown;
-	type TipFindersFee = TipFindersFee;
-	type TipReportDepositBase = TipReportDepositBase;
-	type DataDepositPerByte = DataDepositPerByte;
+	type RejectOrigin = EnsureOneOf<
+		AccountId,
+		EnsureRoot<AccountId>,
+		pallet_collective::EnsureProportionMoreThan<_1, _2, AccountId, CouncilCollective>
+	>;
 	type Event = Event;
 	type OnSlash = ();
 	type ProposalBond = ProposalBond;
 	type ProposalBondMinimum = ProposalBondMinimum;
 	type SpendPeriod = SpendPeriod;
 	type Burn = Burn;
+	type BurnDestination = ();
+	type SpendFunds = Bounties;
+	type WeightInfo = pallet_treasury::weights::SubstrateWeight<Runtime>;
+}
+
+
+impl pallet_bounties::Config for Runtime {
+	type Event = Event;
 	type BountyDepositBase = BountyDepositBase;
 	type BountyDepositPayoutDelay = BountyDepositPayoutDelay;
 	type BountyUpdatePeriod = BountyUpdatePeriod;
 	type BountyCuratorDeposit = BountyCuratorDeposit;
 	type BountyValueMinimum = BountyValueMinimum;
+	type DataDepositPerByte = DataDepositPerByte;
 	type MaximumReasonLength = MaximumReasonLength;
-	type BurnDestination = ();
-	type WeightInfo = pallet_treasury::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = pallet_bounties::weights::SubstrateWeight<Runtime>;
 }
+
+// impl pallet_treasury::Config for Runtime {
+// 	type ModuleId = TreasuryModuleId;
+// 	type Currency = Balances;
+// 	type ApproveOrigin = EnsureOneOf<
+// 		AccountId,
+// 		EnsureRoot<AccountId>,
+// 		pallet_collective::EnsureProportionAtLeast<_3, _5, AccountId, CouncilCollective>
+// 	>;
+// 	type RejectOrigin = EnsureRootOrHalfCouncil;
+// 	type Tippers = Elections;
+// 	type TipCountdown = TipCountdown;
+// 	type TipFindersFee = TipFindersFee;
+// 	type TipReportDepositBase = TipReportDepositBase;
+// 	type DataDepositPerByte = DataDepositPerByte;
+// 	type Event = Event;
+// 	type OnSlash = ();
+// 	type ProposalBond = ProposalBond;
+// 	type ProposalBondMinimum = ProposalBondMinimum;
+// 	type SpendPeriod = SpendPeriod;
+// 	type Burn = Burn;
+// 	type BountyDepositBase = BountyDepositBase;
+// 	type BountyDepositPayoutDelay = BountyDepositPayoutDelay;
+// 	type BountyUpdatePeriod = BountyUpdatePeriod;
+// 	type BountyCuratorDeposit = BountyCuratorDeposit;
+// 	type BountyValueMinimum = BountyValueMinimum;
+// 	type MaximumReasonLength = MaximumReasonLength;
+// 	type BurnDestination = ();
+// 	type WeightInfo = pallet_treasury::weights::SubstrateWeight<Runtime>;
+// }
 
 parameter_types! {
 	pub const SessionDuration: BlockNumber = EPOCH_DURATION_IN_SLOTS as _;
@@ -1067,13 +1105,16 @@ impl edge_chainbridge::Config for Runtime {
     type Event = Event;
     type BridgeOrigin = chainbridge::EnsureBridge<Runtime>;
 	type Currency = Balances;
-    type NativeTokenId = NativeTokenId;    
+    type NativeTokenId = NativeTokenId;
     type NativeTransferFee = NativeTransferFee;
 }
 
 parameter_types! {
 	pub const AssetDepositBase: u64 = 1;
 	pub const AssetDepositPerZombie: u64 = 1;
+	pub const AssetsAllowFreezing: bool = true;
+	pub const AssetsAllowBurning: bool = true;
+	pub const AssetsAllowMinting: bool = true;
 }
 
 impl pallet_assets::Config for Runtime {
@@ -1085,7 +1126,26 @@ impl pallet_assets::Config for Runtime {
 	type AssetDepositBase = AssetDepositBase;
 	type AssetDepositPerZombie = AssetDepositPerZombie;
 	type WeightInfo = ();
+	type AllowFreezing = AssetsAllowFreezing;
+	type AllowBurning = AssetsAllowBurning;
+	type AllowMinting = AssetsAllowMinting;
 }
+
+parameter_types! {
+	pub const RenvmBridgeUnsignedPriority: TransactionPriority = TransactionPriority::max_value() / 16;
+
+	pub const RenVMModuleId: ModuleId = ModuleId(*b"RenToken");
+}
+
+impl edge_ren::Config for Runtime {
+	type Event = Event;
+	type RenVMTokenIdType= constants::currency::AssetId;
+	type RenvmBridgeUnsignedPriority = RenvmBridgeUnsignedPriority;
+	type ControllerOrigin= EnsureRoot<AccountId>;
+	type ModuleId= RenVMModuleId;
+	type Assets = Assets;
+}
+
 
 construct_runtime!(
 	pub enum Runtime where
@@ -1128,12 +1188,14 @@ construct_runtime!(
 		Proxy: pallet_proxy::{Module, Call, Storage, Event<T>},
 		Multisig: pallet_multisig::{Module, Call, Storage, Event<T>},
 		Assets: pallet_assets::{Module, Call, Storage, Event<T>},
+		Bounties: pallet_bounties::{Module, Call, Storage, Event<T>},
 
 		Signaling: signaling::{Module, Call, Storage, Config<T>, Event<T>},
 		Voting: voting::{Module, Call, Storage, Event<T>},
 		TreasuryReward: treasury_reward::{Module, Call, Storage, Config<T>, Event<T>},
 		ChainBridge: chainbridge::{Module, Call, Storage, Event<T>},
 		EdgeBridge: edge_chainbridge::{Module, Call, Event<T>},
+		RenVMBridge: edge_ren::{Module, Call, Storage, Event<T>},
 	}
 );
 
